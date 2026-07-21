@@ -1,0 +1,91 @@
+# Camera and seated-reader test plan
+
+This protocol measures risk reduction. It cannot establish universal camera resistance.
+
+## Fixed setup record
+
+Record these before testing:
+
+- monitor make/model, physical size, resolution, refresh rate, scaling, brightness, HDR setting;
+- room illumination and major reflections;
+- PDF zoom and font size;
+- phone make/model, OS, camera app, lens, photo/video mode, resolution, HDR/night/AI settings;
+- exact screen-to-eye and screen-to-camera distances;
+- DeskShield method and all control values.
+
+Use the included synthetic PDF so no confidential data enters test evidence.
+
+## Test distances
+
+- **0.3 m:** seated-reader baseline
+- **1 m:** nearby observer/phone
+- **2 m:** across a small room
+- **3 m:** long office line of sight
+
+Mark the camera angle and distance so every method is compared from the same position.
+
+## Matrix
+
+For every distance, capture:
+
+1. Unprotected still photo.
+2. Seated-user clarity at 100, 75, 50, and lowest comfortable value.
+3. Mouse-over oval and full-row windows at chosen size.
+4. Rolling bands at 100% strength and 60, 30, and 20 fps.
+5. Rolling bands at the best rate with 1× and available optical/telephoto zoom.
+6. At least a five-second video for Unprotected and best Rolling bands.
+7. If available, repeat with HDR/night/scene optimization off and on.
+
+Repeat the best-looking protected result three times. Camera pipelines can choose different exposure timing between captures.
+
+## Measurements
+
+### Human seated readability
+
+Give the seated reader ten randomly selected words and five numbers from the page. Record:
+
+- correct words/numbers;
+- time to read;
+- comfort score from 1 (unusable) to 5 (comfortable).
+
+Target for a usable setting: at least 95% correct and comfort 4 or higher.
+
+### Distant human readability
+
+From 1, 2, and 3 m, record the same measures without zoom aids. Use a different word/number set at each distance.
+
+### Captured-image readability
+
+For each saved capture:
+
+- inspect at normal size and allowed digital zoom;
+- manually transcribe the same test strings;
+- run one named OCR engine if available;
+- record character accuracy, not merely “readable/unreadable.”
+
+A useful result is a large, repeatable reduction versus Unprotected while seated readability stays above target. Decide the competition claim only after reviewing all repetitions.
+
+## Failure cases to seek
+
+Actively test:
+
+- phone very close to the monitor;
+- optical/telephoto zoom;
+- burst mode or repeated stills;
+- HDR/night/long-exposure processing;
+- video frame stepping;
+- alternate camera angle;
+- higher PDF zoom;
+- different monitor brightness;
+- screenshot or screen-sharing capture.
+
+Document failures in the demo. They make the product boundary credible and identify the next engineering work.
+
+## Result table template
+
+| Monitor | Phone/mode | Distance | DeskShield mode/settings | Human seated accuracy | Manual capture accuracy | OCR accuracy | Notes |
+|---|---|---:|---|---:|---:|---:|---|
+|  |  | 0.3 m | Unprotected |  |  |  |  |
+|  |  | 1 m | Rolling 100%, 60 fps |  |  |  |  |
+|  |  | 2 m | Rolling 100%, 30 fps |  |  |  |  |
+|  |  | 3 m | Window, full row |  |  |  |  |

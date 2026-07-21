@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DeskShield PDF Viewer</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="toolbar">
+      <div class="brand" title="DeskShield PDF">
+        <span class="brand-mark">DS</span>
+        <span class="brand-name">DeskShield</span>
+      </div>
+
+      <div class="tool-group file-tools">
+        <input id="file" class="visually-hidden" type="file" accept="application/pdf,.pdf">
+        <label class="tool-button primary" for="file">Open</label>
+        <button id="demo" class="tool-button">Demo</button>
+        <span id="filename" class="filename" title="camera-privacy-demo.pdf">camera-privacy-demo.pdf</span>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <div class="tool-group navigation-tools" aria-label="Document navigation">
+        <button id="previous" class="icon-button" title="Previous page" aria-label="Previous page">‹</button>
+        <span class="page-count"><strong id="page-number">1</strong>/<strong id="page-count">1</strong></span>
+        <button id="next" class="icon-button" title="Next page" aria-label="Next page">›</button>
+        <button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out">−</button>
+        <span id="zoom-value" class="zoom-value">100%</span>
+        <button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in">+</button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <label class="privacy-toggle" title="Turn every privacy overlay on or off">
+        <input id="privacy-toggle" type="checkbox" checked>
+        <span class="toggle-track" aria-hidden="true"></span>
+        <span>Privacy</span>
+      </label>
+
+      <div id="desk-controls" class="privacy-tools">
+        <div class="method-tabs" aria-label="Privacy method">
+          <button class="method active" data-method="clarity" title="Whole-page seated-user clarity">Clarity</button>
+          <button class="method" data-method="window" title="Reveal a movable reading window">Window</button>
+          <button class="method" data-method="bands" title="Animated rolling-shutter disruption">Bands</button>
+        </div>
+
+        <label class="slider-tool">
+          <span id="strength-label">Clarity</span>
+          <input id="strength" type="range" min="0" max="100" value="72">
+          <output id="strength-value">72%</output>
+        </label>
+
+        <label id="rate-control" class="select-tool hidden">
+          <span>FPS</span>
+          <select id="rate">
+            <option value="60">60</option>
+            <option value="30">30</option>
+            <option value="20">20</option>
+          </select>
+        </label>
+
+        <div id="window-controls" class="window-tools hidden">
+          <label class="select-tool">
+            <span>Shape</span>
+            <select id="shape">
+              <option value="ellipse">Oval</option>
+              <option value="rectangle">Rectangle</option>
+              <option value="row">Full row</option>
+              <option value="circle">Spotlight</option>
+            </select>
+          </label>
+          <label class="slider-tool size-tool">
+            <span>Size</span>
+            <input id="size" type="range" min="70" max="150" value="100">
+            <output id="size-value">100%</output>
+          </label>
+        </div>
+      </div>
+
+      <div class="toolbar-spacer"></div>
+
+      <div class="status-compact" title="PDF status">
+        <span id="status-dot"></span>
+        <span id="status">Loading…</span>
+      </div>
+      <button id="fullscreen" class="icon-button fullscreen-button" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+    </header>
+
+    <section class="viewer">
+      <div id="stage" class="stage">
+        <div class="canvas-stack">
+          <canvas id="pdf-canvas" aria-label="Rendered PDF page"></canvas>
+          <canvas id="privacy-canvas" aria-hidden="true"></canvas>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

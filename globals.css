@@ -1,0 +1,52 @@
+$ErrorActionPreference = "Stop"
+
+$projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$releaseRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot "release"))
+$outputFolder = [IO.Path]::GetFullPath((Join-Path $releaseRoot "deskshield-pdf-extension"))
+$zipPath = [IO.Path]::GetFullPath((Join-Path $releaseRoot "deskshield-pdf-extension.zip"))
+$sourceFolder = Join-Path $projectRoot "extension-src"
+
+$expectedPrefix = $projectRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if (-not $releaseRoot.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+  throw "Refusing to build outside the project directory."
+}
+
+$required = @(
+  (Join-Path $sourceFolder "manifest.json"),
+  (Join-Path $sourceFolder "background.js"),
+  (Join-Path $sourceFolder "viewer.html"),
+  (Join-Path $sourceFolder "viewer.css"),
+  (Join-Path $sourceFolder "viewer.js"),
+  (Join-Path $projectRoot "node_modules\pdfjs-dist\build\pdf.mjs"),
+  (Join-Path $projectRoot "node_modules\pdfjs-dist\build\pdf.worker.mjs"),
+  (Join-Path $projectRoot "public\camera-privacy-demo.pdf")
+)
+foreach ($file in $required) {
+  if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+    throw "Missing build input: $file"
+  }
+}
+
+if (Test-Path -LiteralPath $outputFolder) {
+  Remove-Item -LiteralPath $outputFolder -Recurse -Force
+}
+if (Test-Path -LiteralPath $zipPath) {
+  Remove-Item -LiteralPath $zipPath -Force
+}
+
+[IO.Directory]::CreateDirectory($outputFolder) | Out-Null
+[IO.Directory]::CreateDirectory((Join-Path $outputFolder "vendor")) | Out-Null
+[IO.Directory]::CreateDirectory((Join-Path $outputFolder "sample")) | Out-Null
+
+Copy-Item -LiteralPath (Join-Path $sourceFolder "manifest.json") -Destination $outputFolder
+Copy-Item -LiteralPath (Join-Path $sourceFolder "background.js") -Destination $outputFolder
+Copy-Item -LiteralPath (Join-Path $sourceFolder "viewer.html") -Destination $outputFolder
+Copy-Item -LiteralPath (Join-Path $sourceFolder "viewer.css") -Destination $outputFolder
+Copy-Item -LiteralPath (Join-Path $sourceFolder "viewer.js") -Destination $outputFolder
+Copy-Item -LiteralPath (Join-Path $projectRoot "node_modules\pdfjs-dist\build\pdf.mjs") -Destination (Join-Path $outputFolder "vendor\pdf.mjs")
+Copy-Item -LiteralPath (Join-Path $projectRoot "node_modules\pdfjs-dist\build\pdf.worker.mjs") -Destination (Join-Path $outputFolder "vendor\pdf.worker.mjs")
+Copy-Item -LiteralPath (Join-Path $projectRoot "public\camera-privacy-demo.pdf") -Destination (Join-Path $outputFolder "sample\camera-privacy-demo.pdf")
+
+Compress-Archive -Path (Join-Path $outputFolder "*") -DestinationPath $zipPath -CompressionLevel Optimal
+Write-Output "Extension folder: $outputFolder"
+Write-Output "Extension ZIP: $zipPath"

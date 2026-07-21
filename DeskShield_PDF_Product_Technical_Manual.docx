@@ -1,0 +1,945 @@
+from __future__ import annotations
+
+from pathlib import Path
+from datetime import date
+from PIL import Image
+
+from docx import Document
+from docx.enum.section import WD_SECTION
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.style import WD_STYLE_TYPE
+from docx.shared import Inches, Pt, RGBColor
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DOCS = ROOT / "docs"
+ASSETS = DOCS / "assets"
+OUTPUT = DOCS / "DeskShield_PDF_Product_Technical_Manual.docx"
+CODEX_SESSION_ID = "019f8260-a814-7962-8a2c-b9e4a291273c"
+
+BLUE = "2E74B5"
+BLUE_DARK = "1F4D78"
+TEAL = "1BAA83"
+TEAL_LIGHT = "E7F6F1"
+INK = "182033"
+MUTED = "5D687A"
+LIGHT = "E8EEF5"
+PALE = "F5F7FA"
+AMBER = "B36B00"
+AMBER_LIGHT = "FFF3D6"
+RED = "A33A3A"
+RED_LIGHT = "FDEAEA"
+WHITE = "FFFFFF"
+
+
+def set_cell_shading(cell, fill: str):
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shd = tc_pr.find(qn("w:shd"))
+    if shd is None:
+        shd = OxmlElement("w:shd")
+        tc_pr.append(shd)
+    shd.set(qn("w:fill"), fill)
+
+
+def set_cell_width(cell, width_twips: int):
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_w = tc_pr.find(qn("w:tcW"))
+    if tc_w is None:
+        tc_w = OxmlElement("w:tcW")
+        tc_pr.append(tc_w)
+    tc_w.set(qn("w:w"), str(width_twips))
+    tc_w.set(qn("w:type"), "dxa")
+
+
+def set_table_geometry(table, widths: list[int], indent: int = 120):
+    table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    table.autofit = False
+    tbl_pr = table._tbl.tblPr
+    tbl_w = tbl_pr.find(qn("w:tblW"))
+    if tbl_w is None:
+        tbl_w = OxmlElement("w:tblW")
+        tbl_pr.append(tbl_w)
+    tbl_w.set(qn("w:w"), str(sum(widths)))
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_ind = tbl_pr.find(qn("w:tblInd"))
+    if tbl_ind is None:
+        tbl_ind = OxmlElement("w:tblInd")
+        tbl_pr.append(tbl_ind)
+    tbl_ind.set(qn("w:w"), str(indent))
+    tbl_ind.set(qn("w:type"), "dxa")
+    layout = tbl_pr.find(qn("w:tblLayout"))
+    if layout is None:
+        layout = OxmlElement("w:tblLayout")
+        tbl_pr.append(layout)
+    layout.set(qn("w:type"), "fixed")
+
+    grid = table._tbl.tblGrid
+    for child in list(grid):
+        grid.remove(child)
+    for width in widths:
+        col = OxmlElement("w:gridCol")
+        col.set(qn("w:w"), str(width))
+        grid.append(col)
+
+    for row in table.rows:
+        for idx, cell in enumerate(row.cells):
+            set_cell_width(cell, widths[min(idx, len(widths) - 1)])
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            tc_pr = cell._tc.get_or_add_tcPr()
+            tc_mar = tc_pr.find(qn("w:tcMar"))
+            if tc_mar is None:
+                tc_mar = OxmlElement("w:tcMar")
+                tc_pr.append(tc_mar)
+            for side, amount in (("top", 80), ("bottom", 80), ("start", 120), ("end", 120)):
+                node = tc_mar.find(qn(f"w:{side}"))
+                if node is None:
+                    node = OxmlElement(f"w:{side}")
+                    tc_mar.append(node)
+                node.set(qn("w:w"), str(amount))
+                node.set(qn("w:type"), "dxa")
+
+
+def repeat_table_header(row):
+    tr_pr = row._tr.get_or_add_trPr()
+    node = OxmlElement("w:tblHeader")
+    node.set(qn("w:val"), "true")
+    tr_pr.append(node)
+
+
+def prevent_row_split(row):
+    tr_pr = row._tr.get_or_add_trPr()
+    node = OxmlElement("w:cantSplit")
+    node.set(qn("w:val"), "true")
+    tr_pr.append(node)
+
+
+def set_repeat_heading(paragraph):
+    paragraph.paragraph_format.keep_with_next = True
+    paragraph.paragraph_format.keep_together = True
+
+
+def add_page_number(paragraph):
+    run = paragraph.add_run()
+    fld_char1 = OxmlElement("w:fldChar")
+    fld_char1.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = " PAGE "
+    fld_char2 = OxmlElement("w:fldChar")
+    fld_char2.set(qn("w:fldCharType"), "end")
+    run._r.append(fld_char1)
+    run._r.append(instr)
+    run._r.append(fld_char2)
+
+
+def paragraph_shading(paragraph, fill: str, border: str | None = None):
+    p_pr = paragraph._p.get_or_add_pPr()
+    shd = p_pr.find(qn("w:shd"))
+    if shd is None:
+        shd = OxmlElement("w:shd")
+        p_pr.append(shd)
+    shd.set(qn("w:fill"), fill)
+    if border:
+        p_bdr = p_pr.find(qn("w:pBdr"))
+        if p_bdr is None:
+            p_bdr = OxmlElement("w:pBdr")
+            p_pr.append(p_bdr)
+        left = OxmlElement("w:left")
+        left.set(qn("w:val"), "single")
+        left.set(qn("w:sz"), "18")
+        left.set(qn("w:space"), "8")
+        left.set(qn("w:color"), border)
+        p_bdr.append(left)
+
+
+def add_callout(doc, title: str, body: str, tone: str = "teal"):
+    palette = {
+        "teal": (TEAL_LIGHT, TEAL, TEAL),
+        "warning": (AMBER_LIGHT, AMBER, AMBER),
+        "risk": (RED_LIGHT, RED, RED),
+        "neutral": (PALE, BLUE_DARK, MUTED),
+    }
+    fill, accent, body_color = palette[tone]
+    p = doc.add_paragraph()
+    p.paragraph_format.left_indent = Inches(0.10)
+    p.paragraph_format.right_indent = Inches(0.05)
+    p.paragraph_format.space_before = Pt(6)
+    p.paragraph_format.space_after = Pt(8)
+    p.paragraph_format.line_spacing = 1.15
+    paragraph_shading(p, fill, accent)
+    run = p.add_run(title + "  ")
+    run.bold = True
+    run.font.color.rgb = RGBColor.from_string(accent)
+    run2 = p.add_run(body)
+    run2.font.color.rgb = RGBColor.from_string(body_color)
+    return p
+
+
+def add_body(doc, text: str, bold_prefix: str | None = None):
+    p = doc.add_paragraph()
+    if bold_prefix and text.startswith(bold_prefix):
+        p.add_run(bold_prefix).bold = True
+        p.add_run(text[len(bold_prefix):])
+    else:
+        p.add_run(text)
+    return p
+
+
+def create_list_numbering(doc, kind: str) -> int:
+    numbering = doc.part.numbering_part.element
+    abstract_ids = [int(node.get(qn("w:abstractNumId"))) for node in numbering.findall(qn("w:abstractNum"))]
+    num_ids = [int(node.get(qn("w:numId"))) for node in numbering.findall(qn("w:num"))]
+    abstract_id = max(abstract_ids, default=0) + 1
+    num_id = max(num_ids, default=0) + 1
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(abstract_id))
+    multi = OxmlElement("w:multiLevelType")
+    multi.set(qn("w:val"), "singleLevel")
+    abstract.append(multi)
+    level_node = OxmlElement("w:lvl")
+    level_node.set(qn("w:ilvl"), "0")
+    start_node = OxmlElement("w:start")
+    start_node.set(qn("w:val"), "1")
+    level_node.append(start_node)
+    fmt = OxmlElement("w:numFmt")
+    fmt.set(qn("w:val"), "bullet" if kind == "bullet" else "decimal")
+    level_node.append(fmt)
+    text_node = OxmlElement("w:lvlText")
+    text_node.set(qn("w:val"), "•" if kind == "bullet" else "%1.")
+    level_node.append(text_node)
+    align = OxmlElement("w:lvlJc")
+    align.set(qn("w:val"), "left")
+    level_node.append(align)
+    p_pr = OxmlElement("w:pPr")
+    tabs = OxmlElement("w:tabs")
+    tab = OxmlElement("w:tab")
+    tab.set(qn("w:val"), "num")
+    tab.set(qn("w:pos"), "540")
+    tabs.append(tab)
+    p_pr.append(tabs)
+    ind = OxmlElement("w:ind")
+    ind.set(qn("w:left"), "540")
+    ind.set(qn("w:hanging"), "270")
+    p_pr.append(ind)
+    level_node.append(p_pr)
+    if kind == "bullet":
+        r_pr = OxmlElement("w:rPr")
+        fonts = OxmlElement("w:rFonts")
+        fonts.set(qn("w:ascii"), "Calibri")
+        fonts.set(qn("w:hAnsi"), "Calibri")
+        r_pr.append(fonts)
+        level_node.append(r_pr)
+    abstract.append(level_node)
+    numbering.append(abstract)
+
+    num = OxmlElement("w:num")
+    num.set(qn("w:numId"), str(num_id))
+    abstract_ref = OxmlElement("w:abstractNumId")
+    abstract_ref.set(qn("w:val"), str(abstract_id))
+    num.append(abstract_ref)
+    numbering.append(num)
+    return num_id
+
+
+def apply_list_numbering(paragraph, num_id: int):
+    p_pr = paragraph._p.get_or_add_pPr()
+    num_pr = OxmlElement("w:numPr")
+    ilvl = OxmlElement("w:ilvl")
+    ilvl.set(qn("w:val"), "0")
+    num = OxmlElement("w:numId")
+    num.set(qn("w:val"), str(num_id))
+    num_pr.append(ilvl)
+    num_pr.append(num)
+    p_pr.insert(0, num_pr)
+
+
+def add_bullets(doc, items: list[str], level: int = 0):
+    num_id = create_list_numbering(doc, "bullet")
+    for item in items:
+        p = doc.add_paragraph()
+        apply_list_numbering(p, num_id)
+        p.paragraph_format.left_indent = Inches(0.375 + level * 0.25)
+        p.paragraph_format.first_line_indent = Inches(-0.188)
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(4)
+        p.paragraph_format.line_spacing = 1.25
+        p.add_run(item)
+
+
+def add_numbers(doc, items: list[str]):
+    num_id = create_list_numbering(doc, "decimal")
+    for item in items:
+        p = doc.add_paragraph()
+        apply_list_numbering(p, num_id)
+        p.paragraph_format.left_indent = Inches(0.375)
+        p.paragraph_format.first_line_indent = Inches(-0.188)
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(4)
+        p.paragraph_format.line_spacing = 1.25
+        p.add_run(item)
+
+def add_table(doc, headers: list[str], rows: list[list[str]], widths: list[int], font_size: float = 9.3):
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style = "Table Grid"
+    set_table_geometry(table, widths)
+    header = table.rows[0]
+    repeat_table_header(header)
+    prevent_row_split(header)
+    for i, text in enumerate(headers):
+        set_cell_shading(header.cells[i], LIGHT)
+        paragraph = header.cells[i].paragraphs[0]
+        paragraph.paragraph_format.space_after = Pt(0)
+        run = paragraph.add_run(text)
+        run.bold = True
+        run.font.color.rgb = RGBColor.from_string(BLUE_DARK)
+        run.font.size = Pt(font_size)
+    for row_data in rows:
+        row = table.add_row()
+        prevent_row_split(row)
+        for i, text in enumerate(row_data):
+            paragraph = row.cells[i].paragraphs[0]
+            paragraph.paragraph_format.space_after = Pt(0)
+            paragraph.paragraph_format.line_spacing = 1.1
+            run = paragraph.add_run(str(text))
+            run.font.size = Pt(font_size)
+            if len(table.rows) % 2 == 0:
+                set_cell_shading(row.cells[i], "FAFBFC")
+    set_table_geometry(table, widths)
+    doc.add_paragraph().paragraph_format.space_after = Pt(0)
+    return table
+
+
+def crop_screenshot(source: Path) -> Path:
+    target = source.with_name(source.stem + "-doc.png")
+    with Image.open(source) as image:
+        crop_height = min(image.height, 700)
+        cropped = image.crop((0, 0, image.width, crop_height))
+        cropped.save(target, optimize=True)
+    return target
+
+
+def set_picture_alt_text(inline_shape, title: str, description: str):
+    doc_pr = inline_shape._inline.docPr
+    doc_pr.set("title", title)
+    doc_pr.set("descr", description)
+
+
+def add_picture(doc, path: Path, caption: str, alt: str, width: float = 5.90):
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(4)
+    p.paragraph_format.space_after = Pt(3)
+    shape = p.add_run().add_picture(str(path), width=Inches(width))
+    set_picture_alt_text(shape, caption, alt)
+    cap = doc.add_paragraph(style="Caption")
+    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cap.paragraph_format.space_after = Pt(8)
+    cap.add_run(caption)
+
+
+def section_title(doc, number: str, title: str, subtitle: str | None = None, page_break: bool = False):
+    h = doc.add_heading(f"{number}  {title}", level=1)
+    h.paragraph_format.page_break_before = page_break
+    set_repeat_heading(h)
+    if subtitle:
+        p = doc.add_paragraph(subtitle)
+        p.style = doc.styles["Subtitle"]
+        p.paragraph_format.space_after = Pt(12)
+        p.paragraph_format.keep_with_next = True
+        p.paragraph_format.keep_together = True
+
+def configure_section(section, running_header: bool):
+    section.page_width = Inches(8.5)
+    section.page_height = Inches(11)
+    section.top_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin = Inches(1)
+    section.right_margin = Inches(1)
+    section.header_distance = Inches(0.492)
+    section.footer_distance = Inches(0.492)
+    section.different_first_page_header_footer = False
+
+    headers = [section.header, section.even_page_header]
+    footers = [section.footer, section.even_page_footer]
+    for header in headers:
+        header.is_linked_to_previous = False
+    for footer in footers:
+        footer.is_linked_to_previous = False
+
+    if not running_header:
+        for header in headers:
+            header.paragraphs[0].text = ""
+        for footer in footers:
+            footer.paragraphs[0].text = ""
+        return
+
+    for header in headers:
+        hp = header.paragraphs[0]
+        hp.text = "DESKSHIELD PDF  |  PRODUCT & TECHNICAL MANUAL"
+        hp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        for run in hp.runs:
+            run.font.name = "Calibri"
+            run.font.size = Pt(8.5)
+            run.font.bold = True
+            run.font.color.rgb = RGBColor.from_string(TEAL)
+
+    for footer in footers:
+        fp = footer.paragraphs[0]
+        fp.text = ""
+        fp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        r = fp.add_run("Prototype / internal evaluation   •   July 2026")
+        r.font.name = "Calibri"
+        r.font.size = Pt(8)
+        r.font.color.rgb = RGBColor.from_string(MUTED)
+        fp.paragraph_format.tab_stops.add_tab_stop(Inches(6.25))
+        fp.add_run("\t")
+        add_page_number(fp)
+        for run in fp.runs:
+            if run.font.size is None:
+                run.font.size = Pt(8)
+                run.font.color.rgb = RGBColor.from_string(MUTED)
+
+def configure_document(doc: Document):
+    configure_section(doc.sections[0], running_header=False)
+    doc.settings.odd_and_even_pages_header_footer = True
+
+    normal = doc.styles["Normal"]
+    normal.font.name = "Calibri"
+    normal.font.size = Pt(11)
+    normal.font.color.rgb = RGBColor.from_string(INK)
+    normal.paragraph_format.space_after = Pt(6)
+    normal.paragraph_format.line_spacing = 1.25
+
+    title = doc.styles["Title"]
+    title.font.name = "Calibri"
+    title.font.size = Pt(34)
+    title.font.bold = True
+    title.font.color.rgb = RGBColor.from_string(INK)
+    title.paragraph_format.space_after = Pt(8)
+
+    subtitle = doc.styles["Subtitle"]
+    subtitle.font.name = "Calibri"
+    subtitle.font.size = Pt(12)
+    subtitle.font.color.rgb = RGBColor.from_string(MUTED)
+    subtitle.paragraph_format.space_after = Pt(10)
+
+    for name, size, color, before, after in (
+        ("Heading 1", 16, BLUE, 18, 10),
+        ("Heading 2", 13, BLUE, 14, 7),
+        ("Heading 3", 12, BLUE_DARK, 10, 5),
+    ):
+        style = doc.styles[name]
+        style.font.name = "Calibri"
+        style.font.size = Pt(size)
+        style.font.bold = True
+        style.font.color.rgb = RGBColor.from_string(color)
+        style.paragraph_format.space_before = Pt(before)
+        style.paragraph_format.space_after = Pt(after)
+        style.paragraph_format.keep_with_next = True
+
+    caption = doc.styles["Caption"]
+    caption.font.name = "Calibri"
+    caption.font.size = Pt(9)
+    caption.font.italic = True
+    caption.font.color.rgb = RGBColor.from_string(MUTED)
+
+    if "Kicker" not in [s.name for s in doc.styles]:
+        kicker = doc.styles.add_style("Kicker", WD_STYLE_TYPE.PARAGRAPH)
+    else:
+        kicker = doc.styles["Kicker"]
+    kicker.font.name = "Calibri"
+    kicker.font.size = Pt(10)
+    kicker.font.bold = True
+    kicker.font.color.rgb = RGBColor.from_string(TEAL)
+    kicker.font.all_caps = True
+    kicker.paragraph_format.space_after = Pt(16)
+
+def add_cover(doc: Document):
+    p = doc.add_paragraph(style="Kicker")
+    p.add_run("DESKSHIELD PDF  •  VERSION 0.1.0")
+    p.paragraph_format.space_before = Pt(30)
+
+    title = doc.add_paragraph(style="Title")
+    title.add_run("Read locally.\nReveal deliberately.")
+
+    subtitle = doc.add_paragraph(style="Subtitle")
+    subtitle.add_run("A local-first PDF viewer with seated-user, pointer-window, and rolling-band visual privacy controls")
+
+    band = doc.add_paragraph()
+    band.paragraph_format.space_before = Pt(22)
+    band.paragraph_format.space_after = Pt(26)
+    paragraph_shading(band, TEAL)
+    run = band.add_run("PRODUCT  •  USER  •  TECHNICAL  •  SECURITY  •  VALIDATION MANUAL")
+    run.font.name = "Calibri"
+    run.font.size = Pt(11)
+    run.font.bold = True
+    run.font.color.rgb = RGBColor.from_string(WHITE)
+
+    add_body(doc, "Prepared for product evaluation, browser-extension testing, corporate privacy review, and hackathon submission.")
+
+    doc.add_paragraph().paragraph_format.space_after = Pt(30)
+    meta = add_table(
+        doc,
+        ["Document", "Value"],
+        [
+            ["Product", "DeskShield PDF Viewer"],
+            ["Release", "0.1.0 — proof of concept"],
+            ["Date", "21 July 2026"],
+            ["Deployment", "Local web viewer and Chrome/Edge Manifest V3 extension"],
+            ["Data handling", "PDF bytes remain local to the viewer session"],
+        ],
+        [1900, 7460],
+        9.5,
+    )
+    meta.rows[0].cells[0].paragraphs[0].runs[0].font.color.rgb = RGBColor.from_string(BLUE_DARK)
+    add_callout(doc, "Responsible claim", "DeskShield is a visual risk-reduction layer. It is not a guarantee of camera-proof text and is not a replacement for access control, DLP, DRM, or physical security.", "warning")
+
+
+def build_manual():
+    doc = Document()
+    configure_document(doc)
+    props = doc.core_properties
+    props.title = "DeskShield PDF — Product and Technical Manual"
+    props.subject = "User, technical, security, testing, and deployment documentation"
+    props.author = "DeskShield PDF project"
+    props.keywords = "PDF, privacy, local-first, rolling shutter, browser extension, screen sharing"
+    props.comments = "Generated from the working DeskShield PDF source and live screenshots."
+
+    add_cover(doc)
+    body_section = doc.add_section(WD_SECTION.NEW_PAGE)
+    configure_section(body_section, running_header=True)
+
+    section_title(doc, "0", "Document guide", "Purpose, audience, scope and contents")
+    doc.add_heading("Purpose", level=2)
+    add_body(doc, "This manual documents the current DeskShield PDF proof of concept as a product, an operator workflow, a technical implementation, and a security experiment. It is intended to let a reviewer install the viewer, understand every control, reproduce the build, evaluate the privacy claim, and plan the next release without relying on the source code alone.")
+    doc.add_heading("Intended audience", level=2)
+    add_bullets(doc, [
+        "Employees and presenters who need to keep a PDF open while reducing casual disclosure.",
+        "Security, privacy, legal, compliance, and IT reviewers evaluating the threat model and limitations.",
+        "Developers maintaining the React/PDF.js web viewer or the Manifest V3 browser extension.",
+        "Hackathon judges and testers who need a compilable source tree, a test build, and honest validation criteria.",
+    ])
+    doc.add_heading("Contents at a glance", level=2)
+    add_table(doc, ["Part", "Coverage"], [
+        ["1–3", "Executive summary, problem, corporate use cases and product scope"],
+        ["4–8", "Interface map and complete user guide with live screenshots"],
+        ["9–12", "Screen sharing, architecture, physics and security model"],
+        ["13–16", "Validation, installation, build, QA and troubleshooting"],
+        ["17–19", "Hackathon positioning, roadmap and reference appendices"],
+    ], [1500, 7860])
+    add_callout(doc, "Status", "The software build and automated validation exist. Physical camera measurements, named-device results, and any competition performance claim remain pending until the manual camera matrix is executed.", "neutral")
+
+    section_title(doc, "1", "Executive summary", "What DeskShield is, why it exists, and what makes it useful")
+    add_body(doc, "DeskShield PDF is a local-first viewer experiment for the privacy gap that begins after an authorized user has already opened a document. Normal PDF viewers manage files, pages, zoom and permissions, but they display every visible pixel at full clarity. That creates exposure to shoulder surfing, long-distance reading, phone photography, and oversharing during live calls.")
+    add_body(doc, "DeskShield adds three visual controls without requiring a special monitor or an external sensor. Seated-user clarity applies a tunable high-frequency texture to the complete page. Mouse-over window keeps the page obscured while revealing only the region under the pointer. Rolling bands animate opaque horizontal bands to create difficult or incomplete captures on some rolling-shutter phone cameras.")
+    add_callout(doc, "Core value", "Privacy becomes a normal viewer control: the operator chooses how much of the page is readable, when it is readable, and whether the protection is spatial, interaction-driven, or temporal.", "teal")
+    doc.add_heading("Why the approach is practical", level=2)
+    add_bullets(doc, [
+        "It runs on an ordinary office monitor and existing browser; no physical privacy filter is required for the proof of concept.",
+        "The PDF is selected locally and is not uploaded by this application.",
+        "The compact one-line toolbar keeps the document, not the controls, as the primary workspace.",
+        "The same controls support desk reading, screen sharing, camera experiments and comparative testing.",
+        "The extension asks for no host or optional permissions and opens as a dedicated viewer tab.",
+    ])
+    doc.add_heading("Positioning", level=2)
+    add_body(doc, "DeskShield should be positioned as a risk-reduction and selective-disclosure viewer, not as an absolute anti-camera product. Its most credible innovation is the integrated combination of spatial microtexture, movable disclosure windows, and rolling-shutter-aware temporal overlays in a low-friction PDF workflow.")
+
+    section_title(doc, "2", "Problem and corporate use cases", "The post-access privacy gap")
+    doc.add_heading("The problem", level=2)
+    add_body(doc, "Corporate information is often exposed longer and more broadly than the discussion requires. A legitimate employee may need a PDF open for an extended review, yet nearby observers can read it from across a desk. A phone can photograph the screen. During a call, sharing the viewer can reveal pages, rows, or surrounding context that were never relevant to the conversation.")
+    doc.add_heading("Priority use cases", level=2)
+    add_table(doc, ["Situation", "Exposure", "DeskShield response"], [
+        ["Open office or hot desk", "Nearby people can read unattended or continuously visible content", "Clarity mode reduces distance readability while keeping the page available to the seated operator"],
+        ["Financial, legal or HR review", "Names, values and adjacent rows remain visible even when only one item is needed", "Mouse window reveals a selected paragraph, row or compact spotlight"],
+        ["Client or internal call", "The presenter needs to jump between non-contiguous regions", "The pointer becomes a dynamic disclosure control without editing or pre-redacting the PDF"],
+        ["Phone photography from a distance", "A static clear screen is easy to capture and zoom", "Rolling bands attempt to disrupt some rolling-shutter captures; spatial modes add further degradation"],
+        ["Temporary desk departure", "A document may remain open", "Privacy can stay enabled, but the correct control remains locking the workstation"],
+    ], [2100, 3100, 4160], 8.7)
+    add_callout(doc, "Important boundary", "DeskShield cannot identify who is looking at the monitor and does not lock the file. For unattended workstations, endpoint lock and access-control policy remain mandatory.", "risk")
+
+    section_title(doc, "3", "Product scope and requirements", "What the current release contains")
+    doc.add_heading("Included in release 0.1.0", level=2)
+    add_bullets(doc, [
+        "Open an arbitrary local PDF or the included synthetic demonstration document.",
+        "Render multipage PDFs with previous/next navigation and 60–180% zoom in 10% steps.",
+        "Enable or disable all privacy overlays with one Privacy toggle.",
+        "Select Clarity, Mouse window or Rolling bands from a compact method selector.",
+        "Tune the active mode from 0–100%; set mouse-window size from 70–150%; select 20, 30 or 60 fps for rolling bands.",
+        "Enter browser fullscreen where the control is available; use the browser’s fullscreen shortcut on constrained layouts.",
+        "Run as a local web application or install the packaged Chrome/Edge Manifest V3 extension.",
+    ])
+    doc.add_heading("Out of scope", level=2)
+    add_bullets(doc, [
+        "Cryptographic PDF rights management, persistent redaction, watermark enforcement or print prevention.",
+        "Blocking operating-system screenshots, malicious software, remote administration tools or compromised endpoints.",
+        "Guaranteed failure of every phone, camera, shutter mode, frame rate, distance, zoom level or image-fusion pipeline.",
+        "Automatic viewer replacement for all browser PDF links; the extension opens a dedicated viewer and uses an explicit file picker.",
+        "Server storage, document collaboration, annotations, signing, OCR or content editing in the current proof of concept.",
+    ])
+    add_callout(doc, "Design constraint", "The proof of concept deliberately assumes only an existing monitor and the viewer. The protection must therefore be generated by the application’s pixels and timing, not by special glass, polarizers, cameras, proximity sensors or room infrastructure.", "neutral")
+
+    section_title(doc, "4", "Interface and control map", "One line of controls, one document workspace", page_break=True)
+    add_body(doc, "The current interface is intentionally a single compact top bar. Controls appear only when relevant to the active mode, keeping the PDF viewport as large as possible.")
+    add_table(doc, ["Control", "Function", "Availability"], [
+        ["Open", "Choose a local PDF through the browser file picker", "Always"],
+        ["Demo", "Load the synthetic camera-test PDF", "Wide layouts; the sample is included in the build"],
+        ["<  page/total  >", "Move through a multipage document", "When a PDF is ready"],
+        ["−  zoom  +", "Change zoom between 60% and 180%", "When a PDF is ready"],
+        ["Privacy", "Enable or disable every DeskShield overlay", "Always"],
+        ["Privacy method", "Choose Clarity, Mouse window or Rolling bands", "Privacy enabled"],
+        ["Clarity / Window / Strength", "Adjust the active mode’s 0–100% value", "Privacy enabled"],
+        ["Shape and Size", "Choose reveal geometry and scale", "Mouse window only"],
+        ["FPS", "Choose 60, 30 or 20 overlay updates per second", "Rolling bands only"],
+        ["Ready / Error", "Shows the local renderer status", "Always"],
+        ["Full", "Request browser fullscreen", "Where toolbar width permits"],
+    ], [1900, 4860, 2600], 8.8)
+
+    section_title(doc, "5", "Unprotected baseline", "The control condition for every privacy test", page_break=True)
+    add_picture(
+        doc,
+        crop_screenshot(ASSETS / "deskshield-unprotected.png"),
+        "Figure 1 — Unprotected mode: the privacy toggle is off and the PDF is rendered normally.",
+        "DeskShield viewer showing a clear quarterly project review PDF. The one-line toolbar has the Privacy toggle switched off.",
+    )
+    add_body(doc, "Unprotected is the baseline, not a privacy feature. It provides normal PDF readability and must be captured alongside every protected configuration. Comparing protected images only against memory or a different setup can make a weak effect appear stronger than it is.")
+    add_callout(doc, "Test rule", "Keep monitor, brightness, room lighting, phone, lens, distance, angle, PDF zoom and camera settings fixed when comparing Unprotected with a protected mode.", "warning")
+
+    section_title(doc, "6", "Seated-user clarity", "Whole-page tuning for the primary reader", page_break=True)
+    add_picture(
+        doc,
+        crop_screenshot(ASSETS / "deskshield-clarity.png"),
+        "Figure 2 — Clarity mode at 72%: a high-frequency texture is applied across the complete PDF.",
+        "DeskShield viewer with Privacy enabled, Clarity selected and the clarity slider at 72 percent. Fine vertical texture covers the PDF.",
+    )
+    doc.add_heading("How it behaves", level=2)
+    add_body(doc, "Clarity blends an equal-average, high-frequency texture over the entire rendered page. The texture is derived from the PDF’s luminance so text and page structure remain available to a close, attentive reader, while distance, resampling, defocus and compression can merge fine detail.")
+    add_body(doc, "The control describes seated-user clarity, not overlay strength. At 100%, the ordinary page is fully clear. Lower values replace more of the ordinary page with the privacy texture. The best setting is the lowest value that still meets the seated reader’s accuracy and comfort target.")
+    doc.add_heading("Recommended procedure", level=2)
+    add_numbers(doc, [
+        "Set the PDF zoom and seating position that will be used during work.",
+        "Enable Privacy and select Clarity.",
+        "Start at 100% and reduce the value gradually while reading words, numbers and table cells.",
+        "Stop when the page remains comfortable and at least 95% accurate for the seated reader.",
+        "Check readability from 1 m, 2 m and 3 m and record the actual reduction rather than assuming it.",
+    ])
+    add_callout(doc, "Trade-off", "Clarity is the easiest mode for continuous reading, but it is also the least restrictive. A close camera, zoom or good resampling may recover content, especially at high clarity values.", "warning")
+
+    section_title(doc, "7", "Mouse-over window", "Reveal only the region being read or discussed", page_break=True)
+    add_picture(
+        doc,
+        crop_screenshot(ASSETS / "deskshield-window-rectangle.png"),
+        "Figure 3 — Mouse window at 100% with the Rectangle shape positioned over the table.",
+        "DeskShield viewer with a high-frequency privacy texture over the page and a clear rectangular reveal window around a table under the pointer.",
+    )
+    add_body(doc, "Mouse window applies the privacy texture to the page and removes it only inside a pointer-controlled region. It is the most direct solution for dynamic partial disclosure during a call because the presenter can move between unrelated paragraphs, table rows and values without editing the PDF.")
+    add_table(doc, ["Shape", "Best use", "Disclosure behavior"], [
+        ["Oval band", "Paragraph reading", "Wide, soft-edged horizontal region"],
+        ["Rectangle", "Tables, forms and code blocks", "Larger sharp-edged area"],
+        ["Full row", "Fast scanning and screen-shared discussion", "A horizontal strip across the page"],
+        ["Spotlight", "Single value, label or compact detail", "Small circular focus area"],
+    ], [1700, 3100, 4560])
+    doc.add_heading("Controls", level=2)
+    add_bullets(doc, [
+        "Window clarity controls how completely the texture is removed inside the reveal region; 100% provides maximum local clarity.",
+        "Size ranges from 70% to 150% and scales the selected geometry.",
+        "The reveal region follows pointer movement over the document canvas.",
+        "Only the revealed region is intended for the seated user or meeting audience; the rest of the page remains visually transformed.",
+    ])
+    add_callout(doc, "Screen-share principle", "Share the DeskShield viewer tab or window—not another unprotected PDF viewer—and confirm that the meeting preview shows the overlay before discussing sensitive material.", "teal")
+
+    section_title(doc, "8", "Rolling bands", "Temporal disruption aimed at rolling-shutter cameras", page_break=True)
+    add_picture(
+        doc,
+        crop_screenshot(ASSETS / "deskshield-rolling-bands.png"),
+        "Figure 4 — Rolling bands at 100% and 60 fps: alternating opaque rows obscure large portions of the captured frame.",
+        "DeskShield viewer with Rolling bands selected at 60 frames per second. Thick black horizontal bands cover alternating parts of the PDF.",
+    )
+    doc.add_heading("How it behaves", level=2)
+    add_body(doc, "Rolling bands draw full-width dark stripes whose phase changes over time. Many CMOS phone cameras expose image rows sequentially. If different camera rows sample different overlay phases, the saved image or video frame can contain bands, incomplete text, spatial distortion or unstable brightness that was not perceived in the same way by the seated viewer.")
+    add_body(doc, "Strength controls band opacity from 0–100%. At 100%, the dark portions are opaque. FPS selects 60, 30 or 20 update attempts per second. The browser requests animation frames, but actual presentation is ultimately quantized by the monitor refresh cycle and browser compositor.")
+    doc.add_heading("Tuning on a 60 Hz office display", level=2)
+    add_table(doc, ["Setting", "Reason to test", "Likely trade-off"], [
+        ["60 fps", "Matches the nominal display refresh cadence and maximizes phase changes", "May synchronize with some camera/display combinations"],
+        ["30 fps", "Changes phase every second display refresh at 60 Hz", "Stronger visible flicker or repeated patterns"],
+        ["20 fps", "Changes phase every third display refresh at 60 Hz", "Slower bands and greater seated-user disturbance"],
+    ], [1600, 4300, 3460], 8.8)
+    add_callout(doc, "No universal best rate", "Camera exposure, sensor readout, anti-flicker processing, HDR fusion and monitor timing differ. Test all three rates on named hardware and select the most repeatable result—not the most dramatic single photograph.", "warning")
+
+    section_title(doc, "9", "Operating procedures", "Daily use in the web viewer or extension")
+    doc.add_heading("Open and read a local PDF", level=2)
+    add_numbers(doc, [
+        "Launch the local viewer or click the DeskShield extension toolbar icon.",
+        "Choose Open and select a PDF. The application reads the selected file as local bytes.",
+        "Confirm the status indicator shows Ready and verify the displayed filename.",
+        "Use previous/next and zoom until the working content is comfortably sized.",
+        "Enable Privacy and choose the method appropriate to the task.",
+        "Before relying on the protection, perform a quick viewing or camera check in the actual room and lighting.",
+    ])
+    doc.add_heading("Choose a method", level=2)
+    add_table(doc, ["Task", "Start with", "Then adjust"], [
+        ["Read the whole document continuously", "Clarity", "Reduce clarity to the lowest comfortable seated value"],
+        ["Discuss selected, changing regions", "Mouse window", "Choose shape, size and window clarity"],
+        ["Test long-distance phone capture", "Rolling bands", "Use 100% strength; compare 60, 30 and 20 fps"],
+        ["Check the true baseline", "Privacy off", "Keep all physical and camera conditions unchanged"],
+    ], [2400, 2200, 4760])
+    doc.add_heading("End of session", level=2)
+    add_numbers(doc, [
+        "Stop screen sharing before disabling Privacy.",
+        "Close the viewer tab when the document is no longer needed.",
+        "Lock the workstation whenever leaving the desk; a visual overlay is not an unattended-session control.",
+    ])
+
+    section_title(doc, "10", "Dynamic partial disclosure during screen sharing", "A practical corporate workflow")
+    add_body(doc, "A common meeting problem is that the presenter cannot know in advance which non-contiguous parts of a PDF will be discussed. Static redaction, cropping or a prepared slide deck is too rigid. Sharing the entire PDF is too broad. Mouse window turns the pointer into a continuous disclosure gate.")
+    doc.add_heading("Recommended meeting workflow", level=2)
+    add_numbers(doc, [
+        "Open the PDF in DeskShield and enable Mouse window before starting the share.",
+        "Select Full row for fast document discussion, Rectangle for tables, or Spotlight for individual values.",
+        "Share only the DeskShield tab/window and inspect the meeting platform’s preview.",
+        "Move the window to the exact region currently being discussed; park it over a neutral area when discussion pauses.",
+        "If an entire page must be read, switch to Clarity rather than expanding the window so far that surrounding context is unnecessarily exposed.",
+        "Stop sharing before switching Privacy off or opening an unprotected document.",
+    ])
+    add_callout(doc, "Platform check", "The overlay is rendered in the same browser content, so normal tab/window sharing should capture it. Nevertheless, meeting platforms, GPU paths and capture permissions vary; validate the preview and a test recording for each supported platform.", "warning")
+    doc.add_heading("What this does not prevent", level=2)
+    add_body(doc, "Authorized participants can still photograph or record the revealed region. The viewer reduces unnecessary visual disclosure; it does not create enforceable downstream rights or prevent deliberate redistribution.")
+
+    section_title(doc, "11", "Technical architecture", "Local PDF rendering plus a privacy overlay canvas", page_break=True)
+    add_callout(doc, "Data flow", "Local file picker → ArrayBuffer / Uint8Array → PDF.js document → page canvas → privacy overlay canvas → browser compositor → monitor or shared viewer output.", "teal")
+    doc.add_heading("Web viewer", level=2)
+    add_bullets(doc, [
+        "React 19.2.6 provides application state and toolbar interaction.",
+        "PDF.js 6.1.200 parses and renders local PDF bytes; the matching worker is served from the project’s local public directory.",
+        "The rendered PDF occupies a base canvas. A second canvas is stacked above it for every privacy effect.",
+        "Resize observation fits the page to the document stage; zoom is applied to the PDF viewport.",
+        "requestAnimationFrame drives the overlay loop. Static modes redraw only when a relevant value or pointer position changes; rolling bands redraw on the selected cadence.",
+    ])
+    doc.add_heading("Spatial texture generation", level=2)
+    add_body(doc, "The renderer reads the base canvas pixels and calculates luminance using weighted red, green and blue channels. It generates alternating two-pixel gray and colored micro-patterns whose local mix is influenced by page ink. The result is stored on an off-screen texture canvas and composited above the PDF.")
+    doc.add_heading("Mouse-window compositing", level=2)
+    add_body(doc, "Window mode draws the full privacy texture, switches the overlay context to destination-out compositing, and removes texture inside the selected rectangle, row, oval or circular geometry. Window clarity controls the removal alpha.")
+    doc.add_heading("Rolling-band animation", level=2)
+    add_body(doc, "Band mode clears the overlay, advances a phase counter and draws repeated full-width dark stripes. Band opacity is derived from strength; frame timing is gated by the selected 20/30/60 fps interval.")
+    doc.add_heading("Browser extension", level=2)
+    add_body(doc, "The extension is Manifest V3. Its service worker opens a full viewer tab when the toolbar icon is clicked. It packages PDF.js and the matching worker locally, contains no host permissions, and opens documents only after explicit user selection.")
+    add_table(doc, ["Component", "Source location", "Purpose"], [
+        ["Web viewer", "app/page.tsx", "PDF rendering, state, controls and overlay algorithms"],
+        ["Web styling", "app/globals.css", "Compact responsive toolbar and viewer layout"],
+        ["Extension", "extension-src/", "Manifest, service worker and standalone viewer"],
+        ["Sample PDF", "public/camera-privacy-demo.pdf", "Synthetic readability and camera test content"],
+        ["Packager", "scripts/build-extension.ps1", "Creates unpacked build and ZIP with local PDF.js"],
+        ["Automated checks", "tests/", "Build-output and extension validation"],
+    ], [1800, 3000, 4560], 8.8)
+
+    section_title(doc, "12", "Physics and imaging rationale", "Why a human eye and a camera can respond differently—and why that difference is conditional")
+    doc.add_heading("Spatial sampling", level=2)
+    add_body(doc, "A seated human views a continuous stream of light while the eye makes small involuntary movements and the visual system integrates spatial and temporal cues. A phone camera samples the monitor through a finite pixel grid, optical point-spread function, demosaicing, sharpening, rescaling and compression. When the viewer introduces fine alternating structures near or beyond the camera’s sampling limit, those structures can merge, alias, create moiré or reduce text contrast.")
+    add_body(doc, "The difference is useful but not absolute. A closer camera, longer focal length, higher-resolution sensor, better focus or favorable resampling captures more spatial detail. The same micro-pattern that merges at 3 m may be separable at 0.3 m or after optical zoom.")
+    doc.add_heading("Temporal sampling and rolling shutter", level=2)
+    add_body(doc, "Many CMOS cameras do not expose the complete frame at exactly one instant. Sensor rows begin or end exposure at slightly different times. A time-varying monitor image can therefore appear at different phases from top to bottom of the captured frame. Rolling bands attempt to turn that timing mismatch into incomplete or heavily obscured document content.")
+    add_body(doc, "A global-shutter camera, long exposure, aligned cadence, multi-frame HDR or computational fusion may average, synchronize or reconstruct around the effect. Video frame stepping may reveal useful phases. These are expected failure modes, not implementation surprises.")
+    doc.add_heading("The 60 Hz constraint", level=2)
+    add_body(doc, "On a nominal 60 Hz monitor, new visible frames arrive roughly every 16.7 ms. Requesting updates faster than 60 fps does not create more independent display states. Requesting 30 or 20 fps repeats each overlay state across approximately two or three refreshes. Browser scheduling and display synchronization add further variation, which is why empirical comparison matters more than a theoretical single optimum.")
+    add_callout(doc, "Correct scientific claim", "Different sampling mechanisms can create a useful readability gap under measured conditions. They do not create a universal law that readable-to-human content must be unreadable-to-camera.", "warning")
+
+    section_title(doc, "13", "Security and privacy model", "Assets, adversaries, controls and exclusions")
+    doc.add_heading("Protected assets", level=2)
+    add_bullets(doc, [
+        "Text, numbers, tables and surrounding context visible in an authorized user’s local PDF.",
+        "Content that should remain hidden from casual observers or excluded from a screen-shared discussion.",
+        "Local PDF bytes during the viewer session; the application does not intentionally upload them.",
+    ])
+    doc.add_heading("Threat model", level=2)
+    add_table(doc, ["Actor / technique", "In scope", "Expected control"], [
+        ["Casual shoulder surfer at 1–3 m", "Yes", "Clarity or Mouse window may reduce readable content"],
+        ["Phone photo/video from a distance", "Experimental", "Rolling bands and spatial texture may reduce recovery on tested devices"],
+        ["Meeting participant seeing unrelated regions", "Yes", "Mouse window limits the shared visible region"],
+        ["Close or telephoto camera", "Partly", "Likely failure case; measure and disclose"],
+        ["OS screenshot or compromised endpoint", "No", "Requires endpoint security/DLP; DeskShield cannot block capture"],
+        ["Authorized viewer redistributing revealed text", "No", "Requires policy, rights controls and governance"],
+    ], [2500, 1500, 5360], 8.7)
+    doc.add_heading("Privacy properties", level=2)
+    add_bullets(doc, [
+        "Local selection: PDFs are opened only after the user chooses a file.",
+        "No extension host permissions: the current manifest contains no host or optional permissions.",
+        "No runtime CDN dependency in the packaged extension: PDF.js and its worker are bundled together.",
+        "Ephemeral viewer session: the current product does not implement cloud persistence or document accounts.",
+    ])
+    add_callout(doc, "Defense in depth", "Use DeskShield with screen lock, least privilege, meeting controls, watermarking where appropriate, DLP/DRM, physical privacy practices and incident policy.", "teal")
+
+    section_title(doc, "14", "Validation and camera-test protocol", "Measure risk reduction without overstating the result")
+    doc.add_heading("Fixed setup record", level=2)
+    add_bullets(doc, [
+        "Monitor model, size, resolution, refresh rate, scaling, brightness and HDR setting.",
+        "Room illumination, reflections, PDF zoom and text size.",
+        "Phone model, OS, camera app, lens, photo/video resolution, HDR/night/AI settings.",
+        "Exact screen-to-eye and screen-to-camera distance and angle.",
+        "DeskShield method, strength/clarity, shape, size and fps.",
+    ])
+    doc.add_heading("Required distances and captures", level=2)
+    add_table(doc, ["Distance", "Purpose", "Minimum captures"], [
+        ["0.3 m", "Seated-reader baseline", "Unprotected; Clarity 100/75/50/lowest comfortable; Window; Bands"],
+        ["1 m", "Nearby observer / phone", "All modes; best Bands at normal and available optical zoom"],
+        ["2 m", "Small-room distance", "All modes; still and at least five-second video"],
+        ["3 m", "Long office line of sight", "All modes; repeat the best protected result three times"],
+    ], [1300, 2700, 5360], 8.8)
+    doc.add_heading("Measurements", level=2)
+    add_table(doc, ["Measure", "Method", "Usability target"], [
+        ["Seated human accuracy", "Ten random words and five numbers", "At least 95% correct"],
+        ["Reading comfort", "Reader score from 1 unusable to 5 comfortable", "4 or 5"],
+        ["Manual capture accuracy", "Transcribe the same strings from saved capture, including allowed zoom", "Material and repeatable drop versus Unprotected"],
+        ["OCR accuracy", "One named OCR engine, same crop and settings", "Report character accuracy; do not label merely readable/unreadable"],
+    ], [2100, 4300, 2960], 8.7)
+    doc.add_heading("Result template", level=2)
+    add_table(doc, ["Monitor / phone", "Distance", "Mode / settings", "Human", "Manual", "OCR", "Notes"], [
+        ["Pending", "0.3 m", "Unprotected", "", "", "", "Baseline"],
+        ["Pending", "1 m", "Bands 100%, 60 fps", "", "", "", "Repeat ×3"],
+        ["Pending", "2 m", "Bands 100%, best fps", "", "", "", "Still + video"],
+        ["Pending", "3 m", "Window / full row", "", "", "", "Distant human check"],
+    ], [1800, 850, 2050, 950, 950, 850, 1910], 7.8)
+    add_callout(doc, "Evidence status", "No physical-camera success percentage is claimed in this manual. Populate the table only after running the protocol on named hardware and retaining the original captures.", "risk")
+
+    section_title(doc, "15", "Installation and build", "Web viewer and Chrome/Edge extension")
+    doc.add_heading("Prerequisites", level=2)
+    add_bullets(doc, [
+        "Windows 10 or 11 for the provided PowerShell extension packaging script.",
+        "Node.js 22.13 or newer and npm.",
+        "A current Google Chrome or Microsoft Edge build for extension testing.",
+    ])
+    doc.add_heading("Run the web viewer", level=2)
+    add_numbers(doc, [
+        "Open a terminal in the viewer-demo project directory.",
+        "Run npm install.",
+        "Run npm run dev.",
+        "Open the local URL shown by the development server, then choose Open or Demo.",
+    ])
+    doc.add_heading("Build and verify", level=2)
+    add_table(doc, ["Command", "Result"], [
+        ["npm run build", "Compiles the production web application"],
+        ["npm run build:extension", "Copies the source, local PDF.js module and matching worker; creates unpacked and ZIP builds"],
+        ["npm run verify:extension", "Runs extension package validation"],
+        ["npm test", "Builds both targets and runs the web-output and extension automated checks"],
+    ], [3100, 6260])
+    doc.add_heading("Install the extension test build", level=2)
+    add_numbers(doc, [
+        "Extract release/deskshield-pdf-extension.zip.",
+        "Open chrome://extensions in Chrome or edge://extensions in Microsoft Edge.",
+        "Enable Developer mode.",
+        "Choose Load unpacked and select the extracted deskshield-pdf-extension folder.",
+        "Click the DeskShield toolbar icon; the viewer opens in a full browser tab.",
+        "Choose Open PDF or use the included synthetic sample.",
+    ])
+    add_callout(doc, "Package note", "The ZIP is a test build, not a store-signed installer. Load the extracted folder—not the ZIP itself—through the browser’s Load unpacked control.", "warning")
+
+    section_title(doc, "16", "Quality assurance and troubleshooting", "Automated evidence, manual checks and common failures")
+    doc.add_heading("Automated coverage", level=2)
+    add_body(doc, "The project includes build-output and extension validation. Existing checks verify that the web project compiles, the extension is Manifest V3, the package includes PDF.js and a version-matched worker, local PDF bytes are accepted, all three privacy methods exist, and no network URL is embedded in the extension runtime.")
+    add_callout(doc, "Scope of automation", "Passing automated checks proves packaging and source invariants. It does not prove camera resistance, human comfort, meeting-platform compatibility or accessibility on every device.", "neutral")
+    doc.add_heading("Troubleshooting", level=2)
+    add_table(doc, ["Symptom", "Likely cause", "Action"], [
+        ["PDF does not render", "PDF.js module/worker mismatch or invalid source", "Rebuild so module and worker come from the same installed package; confirm a local data parameter reaches getDocument"],
+        ["Extension shows files but cannot install", "ZIP opened as a folder instead of loading unpacked source", "Extract the ZIP, then select the extracted folder in the extensions page"],
+        ["Toolbar overflows", "Browser viewport is extremely narrow or zoomed", "Reset browser zoom, widen the window or use fullscreen; core responsive styles hide secondary controls first"],
+        ["Mouse window seems missing", "Pointer is outside the document or Privacy/method is not active", "Enable Privacy, select Mouse window and move the pointer over the PDF canvas"],
+        ["Clarity slider appears ineffective", "Value near 100% intentionally approaches the clear page", "Reduce the value substantially and compare against Privacy off"],
+        ["Rolling bands are readable in a photo", "Timing, exposure, HDR fusion or zoom bypassed the effect", "Test 60/30/20 fps, repeat captures, disable computational modes where possible and record the failure"],
+    ], [2100, 3050, 4210], 8.3)
+    doc.add_heading("Release checklist", level=2)
+    add_bullets(doc, [
+        "Production web build completes without errors.",
+        "Extension ZIP and unpacked folder are recreated from source.",
+        "Manifest permissions remain minimal and PDF.js assets are local and version-matched.",
+        "Open, page navigation, zoom, every privacy method and fullscreen are manually smoke-tested.",
+        "Screenshots, README, camera protocol and limitation language match the current UI and behavior.",
+    ])
+
+    section_title(doc, "17", "Hackathon positioning", "How to present the project credibly")
+    doc.add_heading("Category and story", level=2)
+    add_body(doc, "DeskShield fits Work & Productivity because it changes how employees review and present sensitive documents using ordinary equipment. The strongest story is the post-access privacy gap: authorization controls who may open the file, while DeskShield reduces what remains continuously visible after opening.")
+    doc.add_heading("Innovation statement", level=2)
+    add_body(doc, "The novelty is the combination of three complementary controls inside a usable local PDF workflow: spatial-frequency privacy for distance reduction, interaction-driven dynamic region disclosure, and temporal rolling-shutter disruption designed for ordinary 60 Hz office displays.")
+    doc.add_heading("What to demonstrate in under three minutes", level=2)
+    add_numbers(doc, [
+        "Show the unprotected synthetic PDF and state the shoulder-surfing, phone-camera and screen-sharing problem.",
+        "Open a local PDF and demonstrate page navigation and zoom without upload.",
+        "Tune Clarity at the seated position.",
+        "Move Rectangle, Full row and Spotlight between non-contiguous regions in a mock call.",
+        "Compare Unprotected with Rolling bands using a named phone and fixed distance; show a failure case if one occurs.",
+        "Show the source, matching PDF.js worker, extension package and test command.",
+        "Explain Codex/GPT-5.6 contribution accurately; do not describe deterministic runtime graphics as AI.",
+    ])
+    doc.add_heading("Submission readiness", level=2)
+    add_table(doc, ["Item", "Status"], [
+        ["Compilable web source", "Complete"],
+        ["Manifest V3 extension source and ZIP", "Complete"],
+        ["Synthetic sample PDF", "Complete"],
+        ["Setup, limitations and camera-test protocol", "Complete"],
+        ["Named-hardware camera matrix", "Pending"],
+        ["Public video under three minutes with audio", "Pending"],
+        ["Repository/license or private judge sharing", "Pending"],
+        ["Accurate Codex/GPT-5.6 contribution description", "Complete"],
+        ["Codex /feedback Session ID", "Complete"],
+    ], [5700, 3660])
+    add_callout(doc, "Codex /feedback Session ID", CODEX_SESSION_ID, "teal")
+    add_callout(doc, "Judging credibility", "A measured, honest claim is stronger than “camera-proof.” Show both the intended effect and the boundary where a close, zoomed or computational camera recovers content.", "teal")
+
+    section_title(doc, "18", "Roadmap", "Improvements that increase usability, evidence and defensibility")
+    add_table(doc, ["Priority", "Feature", "Outcome"], [
+        ["P0", "Execute multi-phone, multi-monitor camera matrix", "Converts an interesting mechanism into reproducible evidence"],
+        ["P0", "Add saved profiles by monitor and task", "One-click “desk,” “meeting,” and “camera test” configurations"],
+        ["P1", "Calibration wizard using test strings and comfort scoring", "Guides users to the lowest usable Clarity setting"],
+        ["P1", "Meeting safe-state and share preview", "Defaults to obscured output until the presenter deliberately reveals a region"],
+        ["P1", "Keyboard control for window movement/shape", "Improves accessibility and precision without continuous mouse motion"],
+        ["P1", "OCR-based evaluation harness for captured test images", "Measures character recovery consistently while keeping the runtime privacy method deterministic"],
+        ["P2", "Adaptive temporal patterns and randomized phase schedules", "Reduces repeated timing patterns; requires careful comfort and seizure-risk review"],
+        ["P2", "Optional visible watermark/session identity", "Adds deterrence and traceability for authorized screen sharing"],
+        ["P2", "Cross-platform packaging and managed enterprise deployment", "Moves from developer-mode test build toward operational adoption"],
+    ], [900, 3770, 4690], 8.4)
+    add_callout(doc, "Safety requirement", "Any faster or higher-contrast animation must be reviewed for flicker comfort, photosensitive seizure risk, accessibility and enterprise policy before production use.", "risk")
+
+    section_title(doc, "19", "Reference appendices", "Quick facts, project structure and responsible-use checklist")
+    doc.add_heading("A. Quick facts", level=2)
+    add_table(doc, ["Property", "Current value"], [
+        ["Product version", "0.1.0"],
+        ["Primary runtime", "React + PDF.js + layered HTML canvas"],
+        ["Web framework/build", "Next-compatible React application built with Vinext/Vite"],
+        ["Extension", "Chrome/Edge Manifest V3, dedicated viewer tab"],
+        ["PDF.js", "6.1.200 with matching local worker"],
+        ["Privacy modes", "Clarity, Mouse window, Rolling bands"],
+        ["Window shapes", "Oval band, Rectangle, Full row, Spotlight"],
+        ["Rolling rates", "60, 30, 20 fps"],
+        ["Zoom", "60–180% in 10% steps"],
+        ["Network use for selected PDF", "None intentionally; local file bytes are passed to PDF.js"],
+    ], [3100, 6260])
+    doc.add_heading("B. Project structure", level=2)
+    add_table(doc, ["Path", "Contents"], [
+        ["app/", "Web viewer UI, state and overlay implementation"],
+        ["extension-src/", "Manifest V3 extension source"],
+        ["public/", "Synthetic PDF and local PDF.js assets"],
+        ["scripts/", "Reproducible extension build script"],
+        ["release/", "Unpacked extension and downloadable ZIP"],
+        ["tests/", "Automated validation"],
+        ["docs/", "Camera protocol, screenshots and this manual"],
+        ["README.md / SUBMISSION.md", "Build guidance, claims, demo script and submission checklist"],
+    ], [3200, 6160])
+    doc.add_heading("C. Responsible-use checklist", level=2)
+    add_bullets(doc, [
+        "Use synthetic or authorized documents for demonstrations and camera testing.",
+        "State the exact hardware, distance and settings behind every result.",
+        "Retain the Unprotected baseline and all repeated captures.",
+        "Do not label content “camera-proof” or imply protection against screenshots or compromised endpoints.",
+        "Stop sharing before disabling Privacy and lock the workstation when unattended.",
+        "Review animation comfort and accessibility before enterprise deployment.",
+    ])
+    add_callout(doc, "Final summary", "DeskShield is already useful as a selective-disclosure PDF viewer and as a disciplined experiment in camera-resistant presentation. Its path from prototype to product depends on measurement, safe defaults, managed deployment and precise claims.", "teal")
+
+    doc.save(OUTPUT)
+    print(OUTPUT)
+
+
+if __name__ == "__main__":
+    build_manual()
